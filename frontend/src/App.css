@@ -1,0 +1,4 @@
+/* App.css — global resets handled in index.css. Keep this file minimal. */
+#root {
+  min-height: 100vh;
+}
