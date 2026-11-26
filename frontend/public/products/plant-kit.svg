@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ecfdf5"/><stop offset="100%" stop-color="#d1fae5"/></linearGradient>
+    <linearGradient id="pot" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#f1f5f9"/><stop offset="50%" stop-color="#ffffff"/><stop offset="100%" stop-color="#cbd5e1"/></linearGradient>
+  </defs>
+  <rect width="600" height="600" fill="url(#bg)"/>
+  <ellipse cx="300" cy="485" rx="200" ry="22" fill="#64748b" opacity="0.25"/>
+  <!-- Pot 1 (Snake Plant) -->
+  <path d="M185 290 Q175 180 198 125 Q212 190 205 290 Z" fill="#15803d"/>
+  <path d="M210 290 Q218 160 232 105 Q245 175 232 290 Z" fill="#22c55e"/>
+  <path d="M235 290 Q248 185 262 140 Q268 200 250 290 Z" fill="#166534"/>
+  <path d="M165 290 L270 290 L255 460 L180 460 Z" fill="url(#pot)" stroke="#cbd5e1" stroke-width="2"/>
+  <rect x="175" y="460" width="85" height="12" rx="5" fill="#d97706" opacity="0.85"/>
+  <!-- Pot 2 (Peace Lily) -->
+  <path d="M350 300 Q315 215 335 170 Q365 210 370 300 Z" fill="#16a34a"/>
+  <path d="M375 300 Q385 185 405 145 Q420 200 398 300 Z" fill="#15803d"/>
+  <path d="M398 300 Q435 215 450 180 Q445 240 412 300 Z" fill="#22c55e"/>
+  <path d="M375 220 Q385 155 400 170 Q405 205 385 230 Z" fill="#ffffff"/>
+  <path d="M330 300 L435 300 L420 460 L345 460 Z" fill="url(#pot)" stroke="#cbd5e1" stroke-width="2"/>
+  <rect x="340" y="460" width="85" height="12" rx="5" fill="#d97706" opacity="0.85"/>
+</svg>
+

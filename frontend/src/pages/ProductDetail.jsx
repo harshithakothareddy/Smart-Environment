@@ -16,7 +16,7 @@ const CATEGORY_COLORS = {
   'Pollution Protection': '#fee2e2', 'Environmental Accessories': '#fce7f3',
 };
 
-function Stars({ rating, large }) {
+function Stars({ rating, reviews = 120, large }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
       {[1,2,3,4,5].map(i => (
@@ -25,7 +25,7 @@ function Stars({ rating, large }) {
         </svg>
       ))}
       <span style={{ fontSize: large ? 'var(--text-sm)' : '11px', color: 'var(--gray-500)', marginLeft: '4px' }}>
-        {rating} ({(Math.random() * 500 + 100).toFixed(0)} reviews)
+        {rating} ({reviews.toLocaleString('en-IN')} reviews)
       </span>
     </div>
   );
@@ -37,6 +37,7 @@ export default function ProductDetail() {
   const { addToCart, wishlist, toggleWishlist } = useApp();
   const [qty, setQty] = useState(1);
   const [addedToCart, setAddedToCart] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const product = PRODUCTS.find(p => p.id === Number(productId));
   const related = PRODUCTS.filter(p => p.id !== Number(productId) && p.category === product?.category).slice(0, 3);
@@ -77,22 +78,33 @@ export default function ProductDetail() {
 
         <div className="product-detail-layout">
           {/* Image */}
-          <div style={{ background: bg, borderRadius: 'var(--radius-2xl)', height: 360, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+          <div style={{ background: bg, borderRadius: 'var(--radius-2xl)', height: 400, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', border: '1px solid var(--gray-200)' }}>
             {product.badge && (
-              <div style={{ position: 'absolute', top: 'var(--space-4)', left: 'var(--space-4)', background: 'var(--primary-600)', color: 'white', fontSize: '12px', fontWeight: 700, padding: '4px 12px', borderRadius: 'var(--radius-full)' }}>
+              <div style={{ position: 'absolute', top: 'var(--space-4)', left: 'var(--space-4)', background: 'var(--primary-600)', color: 'white', fontSize: '12px', fontWeight: 700, padding: '4px 12px', borderRadius: 'var(--radius-full)', zIndex: 2 }}>
                 {product.badge}
               </div>
             )}
-            <span style={{ fontSize: '100px' }}>{PRODUCT_ICONS[product.image] || '📦'}</span>
+            {product.imageUrl && !imgError ? (
+              <img
+                src={product.imageUrl}
+                alt={product.name}
+                onError={() => setImgError(true)}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
+            ) : (
+              <span style={{ fontSize: '100px' }}>{PRODUCT_ICONS[product.image] || '📦'}</span>
+            )}
           </div>
 
           {/* Details */}
           <div>
-            <div style={{ fontSize: '11px', color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 'var(--space-2)' }}>
-              {product.category}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 'var(--space-2)' }}>
+              <span>{product.category}</span>
+              {product.brand && <><span>·</span><span style={{ color: 'var(--primary-600)' }}>{product.brand}</span></>}
+              {product.sku && <><span>·</span><span>SKU: {product.sku}</span></>}
             </div>
             <h1 style={{ fontSize: 'var(--text-3xl)', marginBottom: 'var(--space-3)' }}>{product.name}</h1>
-            <Stars rating={product.rating} large />
+            <Stars rating={product.rating} reviews={product.reviews} large />
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', margin: 'var(--space-4) 0' }}>
               <span style={{ fontSize: '40px', fontWeight: 900, color: 'var(--gray-900)', fontFamily: 'var(--font-display)' }}>₹{product.price.toLocaleString('en-IN')}</span>
@@ -138,15 +150,9 @@ export default function ProductDetail() {
 
             {/* Features */}
             <div style={{ marginTop: 'var(--space-6)', padding: 'var(--space-4)', background: 'var(--gray-50)', borderRadius: 'var(--radius-xl)' }}>
-              <h4 style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>Key Features</h4>
+              <h4 style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>Key Highlights</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                {[
-                  'High accuracy sensor technology',
-                  'Easy-to-read display with color indicators',
-                  'Mobile app connectivity (WiFi/Bluetooth)',
-                  '1-year manufacturer warranty',
-                  'ISI certified & safety tested',
-                ].map((f, i) => (
+                {(product.highlights || []).map((f, i) => (
                   <div key={i} style={{ display: 'flex', gap: 'var(--space-2)', fontSize: 'var(--text-sm)', color: 'var(--gray-700)' }}>
                     <span style={{ color: 'var(--status-good)', flexShrink: 0 }}>✓</span>
                     {f}
@@ -154,6 +160,34 @@ export default function ProductDetail() {
                 ))}
               </div>
             </div>
+
+            {/* Technical Specifications */}
+            {product.specs && (
+              <div style={{ marginTop: 'var(--space-4)', padding: 'var(--space-4)', background: 'white', border: '1px solid var(--gray-200)', borderRadius: 'var(--radius-xl)' }}>
+                <h4 style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>Technical Specifications</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: 'var(--text-sm)' }}>
+                  {Object.entries(product.specs).map(([k, v]) => (
+                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', paddingBottom: '6px', borderBottom: '1px solid var(--gray-100)' }}>
+                      <span style={{ color: 'var(--gray-500)', fontWeight: 600 }}>{k}</span>
+                      <span style={{ color: 'var(--gray-900)', fontWeight: 600, textAlign: 'right' }}>{v}</span>
+                    </div>
+                  ))}
+                  {product.warranty && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                      <span style={{ color: 'var(--gray-500)', fontWeight: 600 }}>Warranty</span>
+                      <span style={{ color: 'var(--status-good)', fontWeight: 700, textAlign: 'right' }}>{product.warranty}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* In the Box */}
+            {product.inTheBox && (
+              <div style={{ marginTop: 'var(--space-4)', fontSize: 'var(--text-xs)', color: 'var(--gray-600)' }}>
+                <strong>In the Box:</strong> {product.inTheBox.join(' · ')}
+              </div>
+            )}
           </div>
         </div>
 
@@ -163,9 +197,13 @@ export default function ProductDetail() {
             <h2 className="section-title">Related Products</h2>
             <div className="grid-3" style={{ marginTop: 'var(--space-4)' }}>
               {related.map(p => (
-                <div key={p.id} className="card" style={{ cursor: 'pointer' }} onClick={() => navigate(`/shop/product/${p.id}`)}>
-                  <div style={{ height: 140, background: CATEGORY_COLORS[p.category] || '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '48px' }}>
-                    {PRODUCT_ICONS[p.image] || '📦'}
+                <div key={p.id} className="card" style={{ cursor: 'pointer', overflow: 'hidden' }} onClick={() => navigate(`/shop/product/${p.id}`)}>
+                  <div style={{ height: 150, background: CATEGORY_COLORS[p.category] || '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '48px', overflow: 'hidden' }}>
+                    {p.imageUrl ? (
+                      <img src={p.imageUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      PRODUCT_ICONS[p.image] || '📦'
+                    )}
                   </div>
                   <div className="card-body">
                     <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)', marginBottom: 'var(--space-1)' }}>{p.name}</div>

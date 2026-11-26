@@ -158,7 +158,7 @@ export async function fetchRoadRoutes(origin, dest, stations = []) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const url = `https://router.project-osrm.org/route/v1/driving/${oLng},${oLat};${dLng},${dLat}?overview=full&geometries=geojson&alternatives=true`;
+    const url = `https://router.project-osrm.org/route/v1/driving/${oLng},${oLat};${dLng},${dLat}?overview=full&geometries=geojson&alternatives=true&steps=true`;
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
 
@@ -172,6 +172,7 @@ export async function fetchRoadRoutes(origin, dest, stations = []) {
           const distanceMeters = r.distance;
           const durationSeconds = r.duration;
           const pollution = analyzeRoutePollution(waypoints, stations);
+          const steps = parseOsrmSteps(r.legs);
 
           return {
             id: `osrm-route-${idx}`,
@@ -181,6 +182,7 @@ export async function fetchRoadRoutes(origin, dest, stations = []) {
             durationSeconds,
             distanceMeters,
             waypoints,
+            steps,
             pollution,
             summary: r.legs?.[0]?.summary || `Route ${idx + 1}`
           };
@@ -220,6 +222,7 @@ function buildPollutionAwareRoutes(routes, origin, dest, stations) {
       durationSeconds: altDurationSeconds,
       distanceMeters: altDistanceMeters,
       waypoints: altWaypoints,
+      steps: buildFallbackSteps(origin, dest, altWaypoints, altDistanceMeters, altDurationSeconds),
       pollution: altPollution,
       summary: 'Green Corridor / Expressway Bypass'
     };
@@ -367,6 +370,7 @@ function generateFallbackRoadRoutes(origin, dest, stations) {
     durationText: formatDuration(durationSec),
     durationSeconds: durationSec,
     waypoints: normalWaypoints,
+    steps: buildFallbackSteps(origin, dest, normalWaypoints, distKm * 1000, durationSec),
     pollution: normalPollution,
     description: 'Standard highway route'
   };
@@ -381,6 +385,7 @@ function generateFallbackRoadRoutes(origin, dest, stations) {
     durationText: formatDuration(altDurationSec),
     durationSeconds: altDurationSec,
     waypoints: altWaypoints,
+    steps: buildFallbackSteps(origin, dest, altWaypoints, altDistKm * 1000, altDurationSec),
     pollution: altPollution,
     description: 'Alternative corridor with comparatively lower ambient pollution',
     reductionPct: diff > 0 ? Math.round((diff / normalPollution.avgAQI) * 100) : 0
@@ -392,4 +397,110 @@ function generateFallbackRoadRoutes(origin, dest, stations) {
     normalRoute,
     lowerPollutionRoute
   };
+}
+
+/**
+ * Parse OSRM leg steps into clean turn-by-turn directions
+ */
+function parseOsrmSteps(legs = []) {
+  const steps = [];
+  for (const leg of legs) {
+    for (const s of leg.steps || []) {
+      const m = s.maneuver || {};
+      const type = m.type || 'continue';
+      const modifier = m.modifier ? ` ${m.modifier}` : '';
+      const roadName = s.name ? ` onto ${s.name}` : '';
+
+      let icon = '⬆️';
+      let instruction = `Continue${roadName}`;
+
+      if (type === 'depart') {
+        icon = '🚦';
+        instruction = `Start${roadName || ' on route'}`;
+      } else if (type === 'arrive') {
+        icon = '🏁';
+        instruction = 'Arrive at destination';
+      } else if (type === 'roundabout' || type === 'rotary') {
+        icon = '🔄';
+        instruction = `Take roundabout${m.exit ? ` (exit ${m.exit})` : ''}${roadName}`;
+      } else if (modifier.includes('left')) {
+        icon = '⬅️';
+        instruction = `Turn${modifier}${roadName}`;
+      } else if (modifier.includes('right')) {
+        icon = '➡️';
+        instruction = `Turn${modifier}${roadName}`;
+      } else if (type === 'merge') {
+        icon = '🔀';
+        instruction = `Merge${modifier}${roadName}`;
+      } else if (type === 'fork') {
+        icon = '🔱';
+        instruction = `Keep${modifier || ' straight'}${roadName}`;
+      }
+
+      const loc = Array.isArray(m.location) && m.location.length === 2
+        ? [m.location[1], m.location[0]]
+        : null;
+
+      steps.push({
+        icon,
+        instruction: instruction.trim(),
+        distanceText: s.distance > 0 ? formatDistance(s.distance) : '',
+        durationText: s.duration > 30 ? formatDuration(s.duration) : '',
+        location: loc,
+      });
+    }
+  }
+  return steps;
+}
+
+function buildFallbackSteps(origin, dest, waypoints, totalMeters, totalSeconds) {
+  const mid = waypoints[Math.floor(waypoints.length / 2)] || [Number(origin.lat), Number(origin.lng)];
+  return [
+    {
+      icon: '🚦',
+      instruction: `Depart from ${origin.name}`,
+      distanceText: formatDistance(totalMeters * 0.35),
+      durationText: formatDuration(totalSeconds * 0.35),
+      location: [Number(origin.lat), Number(origin.lng)],
+    },
+    {
+      icon: '⬆️',
+      instruction: `Continue along ${origin.name} – ${dest.name} corridor`,
+      distanceText: formatDistance(totalMeters * 0.65),
+      durationText: formatDuration(totalSeconds * 0.65),
+      location: mid,
+    },
+    {
+      icon: '🏁',
+      instruction: `Arrive at ${dest.name}`,
+      distanceText: '',
+      durationText: '',
+      location: [Number(dest.lat), Number(dest.lng)],
+    },
+  ];
+}
+
+/**
+ * Build a Google Maps Directions URL for the selected route
+ */
+export function buildGoogleMapsUrl(origin, dest, activeRoute) {
+  if (!origin || !dest) return 'https://www.google.com/maps';
+  const oCoord = `${Number(origin.lat)},${Number(origin.lng)}`;
+  const dCoord = `${Number(dest.lat)},${Number(dest.lng)}`;
+  const params = new URLSearchParams({
+    api: '1',
+    origin: oCoord,
+    destination: dCoord,
+    travelmode: 'driving',
+  });
+
+  // If lower-pollution route is selected and has waypoints, pass midpoint as a via waypoint
+  if (activeRoute?.type === 'lower_pollution' && activeRoute.waypoints?.length >= 3) {
+    const mid = activeRoute.waypoints[Math.floor(activeRoute.waypoints.length / 2)];
+    if (mid && Number.isFinite(mid[0]) && Number.isFinite(mid[1])) {
+      params.set('waypoints', `${mid[0].toFixed(5)},${mid[1].toFixed(5)}`);
+    }
+  }
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
 }

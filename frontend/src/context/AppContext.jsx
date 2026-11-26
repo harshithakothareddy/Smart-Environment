@@ -11,7 +11,14 @@ import {
   fetchAlerts,
   createAlertApi,
   toggleAlertApi,
-  deleteAlertApi
+  deleteAlertApi,
+  registerUserApi,
+  loginUserApi,
+  demoLoginApi,
+  fetchCurrentUserApi,
+  updateProfileApi,
+  changePasswordApi,
+  getStoredToken,
 } from '../utils/api';
 
 const DEFAULT_REPORTS = [
@@ -127,7 +134,13 @@ const defaultContext = {
   savedLocations: [], setSavedLocations: () => {},
   notifications: true, setNotifications: () => {},
   user: null, setUser: () => {},
-  login: () => {}, logout: () => {},
+  login: async () => ({ success: false }),
+  register: async () => ({ success: false }),
+  demoLogin: async () => ({ success: false }),
+  updateProfile: async () => ({ success: false }),
+  changePassword: async () => ({ success: false }),
+  logout: () => {},
+  authLoading: false,
   authModalOpen: false, setAuthModalOpen: () => {},
   authModalMode: 'login', setAuthModalMode: () => {},
   isLoggedIn: false,
@@ -164,27 +177,99 @@ export const AppProvider = ({ children }) => {
 
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState('login'); // 'login' | 'signup'
+  const [authLoading, setAuthLoading] = useState(false);
 
-  const login = (email, name, role = 'Citizen') => {
-    const newUser = {
-      name: name || (email ? email.split('@')[0] : 'Citizen'),
-      email: email || 'citizen@econexus.in',
-      role,
-      loginTime: new Date().toISOString()
-    };
-    setUser(newUser);
+  const persistAuthSession = (userData, token) => {
+    setUser(userData);
+    if (Array.isArray(userData?.savedLocations) && userData.savedLocations.length > 0) {
+      setSavedLocations(userData.savedLocations);
+    }
     try {
-      localStorage.setItem('econexus_user', JSON.stringify(newUser));
+      localStorage.setItem('econexus_user', JSON.stringify(userData));
+      if (token) {
+        localStorage.setItem('econexus_token', token);
+      }
     } catch (e) {}
-    setAuthModalOpen(false);
+  };
+
+  const login = async (email, password) => {
+    setAuthLoading(true);
+    try {
+      const res = await loginUserApi({ email, password });
+      if (res.success && res.user && res.token) {
+        persistAuthSession(res.user, res.token);
+        setAuthModalOpen(false);
+        return { success: true, user: res.user };
+      }
+      return { success: false, error: res.error || 'Sign in failed.' };
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const register = async (name, email, password) => {
+    setAuthLoading(true);
+    try {
+      const res = await registerUserApi({ name, email, password });
+      if (res.success && res.user && res.token) {
+        persistAuthSession(res.user, res.token);
+        setAuthModalOpen(false);
+        return { success: true, user: res.user };
+      }
+      return { success: false, error: res.error || 'Registration failed.' };
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const demoLogin = async () => {
+    setAuthLoading(true);
+    try {
+      const res = await demoLoginApi();
+      if (res.success && res.user && res.token) {
+        persistAuthSession(res.user, res.token);
+        setAuthModalOpen(false);
+        return { success: true, user: res.user };
+      }
+      return { success: false, error: res.error || 'Demo login failed.' };
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const updateProfile = async (updates) => {
+    const res = await updateProfileApi(updates);
+    if (res.success && res.user) {
+      persistAuthSession(res.user);
+      return { success: true, user: res.user };
+    }
+    return { success: false, error: res.error || 'Failed to update profile.' };
+  };
+
+  const changePassword = async (currentPassword, newPassword) => {
+    return await changePasswordApi({ currentPassword, newPassword });
   };
 
   const logout = () => {
     setUser(null);
     try {
       localStorage.removeItem('econexus_user');
+      localStorage.removeItem('econexus_token');
     } catch (e) {}
   };
+
+  // Refresh authenticated user profile from MongoDB on startup if a token is stored
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token) return;
+    fetchCurrentUserApi().then((res) => {
+      if (res.success && res.user) {
+        persistAuthSession(res.user);
+      } else if (res.status === 401) {
+        logout();
+      }
+    });
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -452,7 +537,7 @@ export const AppProvider = ({ children }) => {
       savedLocations, setSavedLocations,
       notifications, setNotifications,
       user, setUser,
-      login, logout,
+      login, register, demoLogin, updateProfile, changePassword, logout, authLoading,
       authModalOpen, setAuthModalOpen,
       authModalMode, setAuthModalMode,
       isLoggedIn: !!user,

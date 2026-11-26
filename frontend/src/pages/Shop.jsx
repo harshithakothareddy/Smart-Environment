@@ -29,7 +29,7 @@ const CATEGORY_COLORS = {
   'Environmental Accessories': '#fce7f3',
 };
 
-function Stars({ rating }) {
+function Stars({ rating, reviews = 120 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
       {[1,2,3,4,5].map(i => (
@@ -37,7 +37,7 @@ function Stars({ rating }) {
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
         </svg>
       ))}
-      <span style={{ fontSize: '11px', color: 'var(--gray-500)', marginLeft: '4px' }}>{rating} ({(Math.random() * 500 + 100).toFixed(0)})</span>
+      <span style={{ fontSize: '11px', color: 'var(--gray-500)', marginLeft: '4px' }}>{rating} ({reviews.toLocaleString('en-IN')})</span>
     </div>
   );
 }
@@ -45,6 +45,7 @@ function Stars({ rating }) {
 function ProductCard({ product }) {
   const { addToCart, wishlist, toggleWishlist } = useApp();
   const navigate = useNavigate();
+  const [imgError, setImgError] = useState(false);
   const isWished = wishlist.some(p => p.id === product.id);
   const discount = Math.round((1 - product.price / product.originalPrice) * 100);
   const bg = CATEGORY_COLORS[product.category] || '#f1f5f9';
@@ -63,18 +64,28 @@ function ProductCard({ product }) {
       </button>
       <div
         className="product-image"
-        style={{ background: bg, cursor: 'pointer' }}
+        style={{ background: bg, cursor: 'pointer', overflow: 'hidden', padding: 0 }}
         onClick={() => navigate(`/shop/product/${product.id}`)}
         role="button"
         tabIndex={0}
         aria-label={`View ${product.name} details`}
         onKeyDown={e => e.key === 'Enter' && navigate(`/shop/product/${product.id}`)}
       >
-        <span style={{ fontSize: '60px' }}>{PRODUCT_ICONS[product.image] || '📦'}</span>
+        {product.imageUrl && !imgError ? (
+          <img
+            src={product.imageUrl}
+            alt={product.name}
+            onError={() => setImgError(true)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : (
+          <span style={{ fontSize: '60px' }}>{PRODUCT_ICONS[product.image] || '📦'}</span>
+        )}
       </div>
       <div className="product-card-body">
-        <div style={{ fontSize: '10px', color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
-          {product.category}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+          <span>{product.category}</span>
+          {product.brand && <span style={{ color: 'var(--primary-600)' }}>{product.brand}</span>}
         </div>
         <h3
           className="product-name"
@@ -84,7 +95,7 @@ function ProductCard({ product }) {
           {product.name}
         </h3>
         <p className="product-desc">{product.description}</p>
-        <Stars rating={product.rating} />
+        <Stars rating={product.rating} reviews={product.reviews} />
         <div className="product-price-row">
           <div>
             <span className="product-price">₹{product.price.toLocaleString('en-IN')}</span>

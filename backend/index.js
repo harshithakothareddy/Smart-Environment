@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const { connectDB } = require('./config/db');
@@ -14,6 +15,8 @@ connectDB();
 
 // Import API routes
 const apiRoutes = require('./routes/api');
+const authRoutes = require('./routes/auth');
+app.use('/api/auth', authRoutes);
 app.use('/api', apiRoutes);
 
 app.get('/', (req, res) => {
@@ -23,6 +26,7 @@ app.get('/', (req, res) => {
     status: 'online',
     endpoints: {
       health: '/api/health',
+      auth: '/api/auth',
       reports: '/api/reports',
       alerts: '/api/alerts',
       cities: '/api/cities',

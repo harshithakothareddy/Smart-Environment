@@ -161,3 +161,77 @@ export async function fetchCities() {
     return null;
   }
 }
+
+/**
+ * Authentication & User Profile APIs
+ */
+export function getStoredToken() {
+  try {
+    return localStorage.getItem('econexus_token');
+  } catch {
+    return null;
+  }
+}
+
+async function authRequest(path, { method = 'GET', body, auth = false } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (auth) {
+    const token = getStoredToken();
+    if (!token) {
+      return { success: false, status: 401, error: 'Not authenticated' };
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        status: res.status,
+        error: data.error || `Request failed (${res.status})`,
+      };
+    }
+    return { ...data, success: true };
+  } catch (err) {
+    return {
+      success: false,
+      status: 0,
+      error: 'Unable to reach backend server. Make sure the backend is running.',
+    };
+  }
+}
+
+export function registerUserApi({ name, email, password }) {
+  return authRequest('/auth/register', { method: 'POST', body: { name, email, password } });
+}
+
+export function loginUserApi({ email, password }) {
+  return authRequest('/auth/login', { method: 'POST', body: { email, password } });
+}
+
+export function demoLoginApi() {
+  return authRequest('/auth/demo', { method: 'POST' });
+}
+
+export function fetchCurrentUserApi() {
+  return authRequest('/auth/me', { method: 'GET', auth: true });
+}
+
+export function updateProfileApi(updates) {
+  return authRequest('/auth/profile', { method: 'PATCH', body: updates, auth: true });
+}
+
+export function changePasswordApi({ currentPassword, newPassword }) {
+  return authRequest('/auth/change-password', {
+    method: 'POST',
+    body: { currentPassword, newPassword },
+    auth: true,
+  });
+}

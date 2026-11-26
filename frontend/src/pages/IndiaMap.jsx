@@ -11,18 +11,44 @@ import {
   getStatusFromAQI,
   getStatusFromWQI
 } from '../data/mockData';
-import { fetchRoadRoutes } from '../utils/routeAnalyzer';
+import { fetchRoadRoutes, buildGoogleMapsUrl } from '../utils/routeAnalyzer';
+import RouteLocationInput from '../components/RouteLocationInput';
 
-// Custom Map Controller to center map programmatically
-function MapRecenter({ center, zoom }) {
+// Custom Map Controller to center map programmatically or fit route bounds
+function MapRecenter({ center, zoom, routeBounds }) {
   const map = useMap();
   useEffect(() => {
-    if (center) {
+    if (routeBounds && routeBounds.length >= 2) {
+      map.fitBounds(routeBounds, { padding: [50, 50], maxZoom: 14, animate: true });
+    } else if (center) {
       map.setView(center, zoom || 6, { animate: true });
     }
-  }, [center, zoom, map]);
+  }, [center, zoom, routeBounds, map]);
   return null;
 }
+
+const createEndpointIcon = (letter, bg) =>
+  L.divIcon({
+    className: 'custom-endpoint-marker',
+    html: `
+      <div style="
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: ${bg};
+        color: white;
+        font-weight: 900;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 3px solid white;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+      ">${letter}</div>
+    `,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
 
 // Custom Marker Generator with CSS Badges
 const createAqiIcon = (aqi, label) => {
@@ -129,21 +155,31 @@ export default function IndiaMap() {
 
   // Safe Route Navigation State
   const [isRoutingActive, setIsRoutingActive] = useState(true);
-  const [originCityName, setOriginCityName] = useState('Delhi');
-  const [destCityName, setDestCityName] = useState('Jaipur');
+  const [originLocation, setOriginLocation] = useState(() => {
+    const c = CITIES[0];
+    return c ? { name: c.name, displayName: `${c.name}, ${c.state}`, state: c.state, lat: Number(c.lat), lng: Number(c.lng), aqi: c.aqi } : null;
+  });
+  const [destLocation, setDestLocation] = useState(() => {
+    const c = CITIES.find(x => x.name === 'Jaipur') || CITIES[7] || CITIES[1];
+    return c ? { name: c.name, displayName: `${c.name}, ${c.state}`, state: c.state, lat: Number(c.lat), lng: Number(c.lng), aqi: c.aqi } : null;
+  });
   const [selectedRouteKey, setSelectedRouteKey] = useState('lower_pollution'); // 'lower_pollution' or 'normal'
   const [roadRouteData, setRoadRouteData] = useState(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [showDirections, setShowDirections] = useState(false);
+  const [activeStepIdx, setActiveStepIdx] = useState(null);
 
-  // Map Center
+  // Map Center & Bounds
   const [mapCenter, setMapCenter] = useState([22.5, 79.5]);
   const [mapZoom, setMapZoom] = useState(5);
+  const [routeBounds, setRouteBounds] = useState(null);
 
   // Check URL params for focusing on specific coords (e.g. from report click)
   useEffect(() => {
     const latParam = searchParams.get('lat');
     const lngParam = searchParams.get('lng');
     if (latParam && lngParam) {
+      setRouteBounds(null);
       setMapCenter([parseFloat(latParam), parseFloat(lngParam)]);
       setMapZoom(11);
     }
@@ -154,30 +190,27 @@ export default function IndiaMap() {
     return (citiesData || []).filter(c => c && Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng)));
   }, [citiesData]);
 
-  // Cities selection
-  const originCity = useMemo(() => {
-    if (!validCities.length) return null;
-    return validCities.find(c => c.name === originCityName) || validCities[0];
-  }, [validCities, originCityName]);
-
-  const destCity = useMemo(() => {
-    if (!validCities.length) return null;
-    return validCities.find(c => c.name === destCityName) || validCities[7] || validCities[1] || validCities[0];
-  }, [validCities, destCityName]);
-
   // Fetch real road routes and analyze ambient pollution levels along waypoints
   useEffect(() => {
     let isCancelled = false;
 
     async function loadRoadRoutes() {
-      if (!originCity || !destCity || originCity.name === destCity.name) {
+      if (!originLocation || !destLocation) {
+        setRoadRouteData(null);
+        return;
+      }
+      const sameCoords =
+        Math.abs(Number(originLocation.lat) - Number(destLocation.lat)) < 0.0005 &&
+        Math.abs(Number(originLocation.lng) - Number(destLocation.lng)) < 0.0005;
+      if (sameCoords) {
         setRoadRouteData(null);
         return;
       }
 
       setIsCalculatingRoute(true);
+      setActiveStepIdx(null);
       try {
-        const result = await fetchRoadRoutes(originCity, destCity, validCities);
+        const result = await fetchRoadRoutes(originLocation, destLocation, validCities);
         if (!isCancelled && result) {
           setRoadRouteData(result);
           if (result.lowerPollutionRoute) {
@@ -200,26 +233,21 @@ export default function IndiaMap() {
     return () => {
       isCancelled = true;
     };
-  }, [originCity, destCity, validCities]);
+  }, [originLocation, destLocation, validCities]);
 
-  // Auto-center when road route changes
+  const activeRoute = useMemo(() => {
+    if (!roadRouteData) return null;
+    return selectedRouteKey === 'lower_pollution' && roadRouteData.lowerPollutionRoute
+      ? roadRouteData.lowerPollutionRoute
+      : roadRouteData.normalRoute;
+  }, [roadRouteData, selectedRouteKey]);
+
+  // Fit map bounds to active route when route changes
   useEffect(() => {
-    if (roadRouteData && isRoutingActive) {
-      const activeRoute =
-        selectedRouteKey === 'lower_pollution' && roadRouteData.lowerPollutionRoute
-          ? roadRouteData.lowerPollutionRoute
-          : roadRouteData.normalRoute;
-
-      if (activeRoute && activeRoute.waypoints && activeRoute.waypoints.length > 0) {
-        const midIdx = Math.floor(activeRoute.waypoints.length / 2);
-        const midPoint = activeRoute.waypoints[midIdx];
-        if (midPoint && Number.isFinite(midPoint[0]) && Number.isFinite(midPoint[1])) {
-          setMapCenter([midPoint[0], midPoint[1]]);
-          setMapZoom(7);
-        }
-      }
+    if (activeRoute?.waypoints?.length >= 2 && isRoutingActive) {
+      setRouteBounds(activeRoute.waypoints);
     }
-  }, [roadRouteData, selectedRouteKey, isRoutingActive]);
+  }, [activeRoute, isRoutingActive]);
 
   return (
     <div className="page-wrapper" style={{ paddingBottom: 'var(--space-10)' }}>
@@ -324,8 +352,10 @@ export default function IndiaMap() {
                       className="filter-pill"
                       style={{ fontSize: '10px', padding: '3px 8px' }}
                       onClick={() => {
-                        setOriginCityName(preset.origin);
-                        setDestCityName(preset.dest);
+                        const o = validCities.find(c => c.name === preset.origin);
+                        const d = validCities.find(c => c.name === preset.dest);
+                        if (o) setOriginLocation({ name: o.name, displayName: `${o.name}, ${o.state}`, state: o.state, lat: Number(o.lat), lng: Number(o.lng), aqi: o.aqi });
+                        if (d) setDestLocation({ name: d.name, displayName: `${d.name}, ${d.state}`, state: d.state, lat: Number(d.lat), lng: Number(d.lng), aqi: d.aqi });
                       }}
                     >
                       {preset.label}
@@ -334,32 +364,17 @@ export default function IndiaMap() {
                 </div>
               </div>
 
-              {/* Start Location & Destination Inputs */}
+              {/* Start Location & Destination Search Inputs (Any Location in India + GPS) */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <label style={{ fontSize: '11px', color: 'var(--gray-600)', fontWeight: 700, textTransform: 'uppercase' }}>
-                      📍 Start Location
-                    </label>
-                    {originCity && (
-                      <span className={`badge badge-${getStatusFromAQI(originCity.aqi || 0).className}`} style={{ fontSize: '10px' }}>
-                        AQI {originCity.aqi || 0}
-                      </span>
-                    )}
-                  </div>
-                  <select
-                    className="input"
-                    value={originCityName}
-                    onChange={e => setOriginCityName(e.target.value)}
-                    style={{ width: '100%' }}
-                  >
-                    {validCities.map(c => (
-                      <option key={`orig-${c.id || c._id || c.name}`} value={c.name}>
-                        {c.name} ({c.state}) — AQI {c.aqi || 0}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <RouteLocationInput
+                  label="Start Location"
+                  icon="📍"
+                  selectedLocation={originLocation}
+                  onSelect={setOriginLocation}
+                  citiesData={validCities}
+                  placeholder="Search start city, area, or landmark..."
+                  showGpsButton={true}
+                />
 
                 <div style={{ textAlign: 'center', margin: '-4px 0' }}>
                   <button
@@ -367,9 +382,9 @@ export default function IndiaMap() {
                     className="btn btn-ghost btn-sm"
                     style={{ fontSize: '12px' }}
                     onClick={() => {
-                      const temp = originCityName;
-                      setOriginCityName(destCityName);
-                      setDestCityName(temp);
+                      const temp = originLocation;
+                      setOriginLocation(destLocation);
+                      setDestLocation(temp);
                     }}
                     title="Swap Start Location and Destination"
                   >
@@ -377,30 +392,14 @@ export default function IndiaMap() {
                   </button>
                 </div>
 
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <label style={{ fontSize: '11px', color: 'var(--gray-600)', fontWeight: 700, textTransform: 'uppercase' }}>
-                      🎯 Destination
-                    </label>
-                    {destCity && (
-                      <span className={`badge badge-${getStatusFromAQI(destCity.aqi || 0).className}`} style={{ fontSize: '10px' }}>
-                        AQI {destCity.aqi || 0}
-                      </span>
-                    )}
-                  </div>
-                  <select
-                    className="input"
-                    value={destCityName}
-                    onChange={e => setDestCityName(e.target.value)}
-                    style={{ width: '100%' }}
-                  >
-                    {validCities.map(c => (
-                      <option key={`dest-${c.id || c._id || c.name}`} value={c.name}>
-                        {c.name} ({c.state}) — AQI {c.aqi || 0}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <RouteLocationInput
+                  label="Destination"
+                  icon="🎯"
+                  selectedLocation={destLocation}
+                  onSelect={setDestLocation}
+                  citiesData={validCities}
+                  placeholder="Search any destination in India..."
+                />
               </div>
 
               {/* Loading State */}
@@ -518,6 +517,102 @@ export default function IndiaMap() {
                     )}
                   </div>
 
+                  {/* Start Directions & Open in Google Maps Actions */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: 'var(--space-3)' }}>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${showDirections ? 'btn-secondary' : 'btn-primary'}`}
+                      style={{ justifyContent: 'center', fontWeight: 700 }}
+                      onClick={() => {
+                        setShowDirections((v) => !v);
+                        if (!showDirections && activeRoute?.waypoints?.length >= 2) {
+                          setRouteBounds(activeRoute.waypoints);
+                        }
+                      }}
+                    >
+                      🧭 {showDirections ? 'Hide Directions' : 'Start Directions'}
+                    </button>
+
+                    <a
+                      href={buildGoogleMapsUrl(originLocation, destLocation, activeRoute)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-outline btn-sm"
+                      style={{ justifyContent: 'center', fontWeight: 700, textDecoration: 'none' }}
+                    >
+                      🗺️ Google Maps ↗
+                    </a>
+                  </div>
+
+                  {/* On-Page Turn-by-Turn Directions Panel */}
+                  {showDirections && activeRoute?.steps && (
+                    <div
+                      style={{
+                        marginTop: 'var(--space-3)',
+                        border: '1px solid var(--primary-200)',
+                        borderRadius: '10px',
+                        background: 'white',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding: '8px 12px',
+                          background: 'var(--primary-50)',
+                          borderBottom: '1px solid var(--primary-100)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: 'var(--primary-800)',
+                        }}
+                      >
+                        <span>🧭 Turn-by-Turn ({activeRoute.name})</span>
+                        <span>{activeRoute.distanceText} · {activeRoute.durationText}</span>
+                      </div>
+                      <div style={{ maxHeight: '230px', overflowY: 'auto' }}>
+                        {activeRoute.steps.map((step, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setActiveStepIdx(idx);
+                              if (step.location) {
+                                setRouteBounds(null);
+                                setMapCenter(step.location);
+                                setMapZoom(14);
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              padding: '8px 12px',
+                              border: 'none',
+                              borderBottom: idx < activeRoute.steps.length - 1 ? '1px solid var(--gray-100)' : 'none',
+                              background: activeStepIdx === idx ? '#eff6ff' : 'white',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '8px',
+                              fontSize: '12px',
+                            }}
+                          >
+                            <span style={{ fontSize: '14px', flexShrink: 0 }}>{step.icon}</span>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600, color: 'var(--gray-900)' }}>{step.instruction}</div>
+                              {(step.distanceText || step.durationText) && (
+                                <div style={{ fontSize: '10px', color: 'var(--gray-500)', marginTop: 2 }}>
+                                  {[step.distanceText, step.durationText].filter(Boolean).join(' · ')}
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Realistic & Professional Environmental Advisory */}
                   <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-3)', background: 'var(--gray-50)', borderRadius: 'var(--radius-md)', fontSize: '11px' }}>
                     <div style={{ fontWeight: 700, color: 'var(--gray-800)', marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -544,12 +639,49 @@ export default function IndiaMap() {
               scrollWheelZoom={true}
               style={{ width: '100%', height: '100%', minHeight: '620px', zIndex: 1 }}
             >
-              <MapRecenter center={mapCenter} zoom={mapZoom} />
+              <MapRecenter center={mapCenter} zoom={mapZoom} routeBounds={routeBounds} />
 
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
+
+              {/* START (A) & DESTINATION (B) MARKERS */}
+              {isRoutingActive && originLocation && (
+                <Marker
+                  position={[Number(originLocation.lat), Number(originLocation.lng)]}
+                  icon={createEndpointIcon('A', '#2563eb')}
+                >
+                  <Popup>
+                    <strong>📍 Start: {originLocation.name}</strong>
+                    <div style={{ fontSize: '11px', color: 'var(--gray-600)' }}>{originLocation.displayName}</div>
+                  </Popup>
+                </Marker>
+              )}
+              {isRoutingActive && destLocation && (
+                <Marker
+                  position={[Number(destLocation.lat), Number(destLocation.lng)]}
+                  icon={createEndpointIcon('B', '#16a34a')}
+                >
+                  <Popup>
+                    <strong>🎯 Destination: {destLocation.name}</strong>
+                    <div style={{ fontSize: '11px', color: 'var(--gray-600)' }}>{destLocation.displayName}</div>
+                  </Popup>
+                </Marker>
+              )}
+
+              {/* ACTIVE DIRECTION STEP HIGHLIGHT */}
+              {showDirections && activeStepIdx !== null && activeRoute?.steps?.[activeStepIdx]?.location && (
+                <CircleMarker
+                  center={activeRoute.steps[activeStepIdx].location}
+                  radius={10}
+                  pathOptions={{ color: '#2563eb', fillColor: '#60a5fa', fillOpacity: 0.9, weight: 3 }}
+                >
+                  <Popup>
+                    <strong>{activeRoute.steps[activeStepIdx].icon} {activeRoute.steps[activeStepIdx].instruction}</strong>
+                  </Popup>
+                </CircleMarker>
+              )}
 
               {/* DRAW REAL ROAD ROUTES */}
               {roadRouteData && isRoutingActive && (

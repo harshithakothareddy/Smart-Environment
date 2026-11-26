@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 
 export default function ProtectedRoute({ children, pageTitle = 'Environmental Telemetry' }) {
-  const { user, setAuthModalOpen, setAuthModalMode, login } = useApp();
+  const { user, setAuthModalOpen, setAuthModalMode, demoLogin, authLoading } = useApp();
 
   if (user) {
     return children;
@@ -15,7 +15,7 @@ export default function ProtectedRoute({ children, pageTitle = 'Environmental Te
   };
 
   const handleQuickDemo = () => {
-    login('citizen@econexus.in', 'Citizen Steward', 'Citizen');
+    demoLogin();
   };
 
   return (
@@ -74,10 +74,11 @@ export default function ProtectedRoute({ children, pageTitle = 'Environmental Te
 
           <button
             onClick={handleQuickDemo}
+            disabled={authLoading}
             className="btn btn-secondary btn-md"
             style={{ width: '100%', justifyContent: 'center', fontWeight: 700, background: '#f8fafc', border: '1px solid #cbd5e1' }}
           >
-            ⚡ 1-Click Quick Demo Sign In
+            {authLoading ? 'Signing In...' : '⚡ 1-Click Quick Demo Sign In'}
           </button>
 
           <Link

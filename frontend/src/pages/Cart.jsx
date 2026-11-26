@@ -87,8 +87,12 @@ export default function Cart() {
               <div className="card-body">
                 {cart.map(item => (
                   <div key={item.id} className="cart-item">
-                    <div className="cart-item-image">
-                      <span style={{ fontSize: '32px' }}>📦</span>
+                    <div className="cart-item-image" style={{ overflow: 'hidden' }}>
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt={item.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <span style={{ fontSize: '32px' }}>📦</span>
+                      )}
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, color: 'var(--gray-800)', marginBottom: 4 }}>{item.name}</div>
@@ -123,7 +127,13 @@ export default function Cart() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 'var(--space-3)' }}>
                   {related.map(p => (
                     <div key={p.id} className="card" style={{ padding: 'var(--space-3)', textAlign: 'center', cursor: 'pointer' }} onClick={() => addToCart(p)}>
-                      <div style={{ fontSize: '36px', marginBottom: 'var(--space-2)' }}>📦</div>
+                      <div style={{ height: 90, borderRadius: '8px', overflow: 'hidden', background: 'var(--gray-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-2)' }}>
+                        {p.imageUrl ? (
+                          <img src={p.imageUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <span style={{ fontSize: '36px' }}>📦</span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--gray-800)', marginBottom: 4 }}>{p.name}</div>
                       <div style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--primary-600)' }}>₹{p.price.toLocaleString('en-IN')}</div>
                       <button className="btn btn-primary btn-sm" style={{ marginTop: 'var(--space-2)', width: '100%' }}>+ Add</button>

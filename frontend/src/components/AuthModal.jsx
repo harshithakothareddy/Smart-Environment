@@ -2,7 +2,16 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 
 export default function AuthModal() {
-  const { authModalOpen, setAuthModalOpen, authModalMode, setAuthModalMode, login } = useApp();
+  const {
+    authModalOpen,
+    setAuthModalOpen,
+    authModalMode,
+    setAuthModalMode,
+    login,
+    register,
+    demoLogin,
+    authLoading,
+  } = useApp();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -10,23 +19,47 @@ export default function AuthModal() {
 
   if (!authModalOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email.trim()) {
+    const trimmedEmail = email.trim();
+    const trimmedName = name.trim();
+
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       setError('Please enter a valid email address.');
       return;
     }
-    if (password.length < 4) {
-      setError('Password must be at least 4 characters.');
+    if (authModalMode === 'signup') {
+      if (trimmedName.length < 2) {
+        setError('Full name must be at least 2 characters.');
+        return;
+      }
+      if (password.length < 6) {
+        setError('Password must be at least 6 characters.');
+        return;
+      }
+    } else if (!password) {
+      setError('Please enter your password.');
       return;
     }
+
     setError('');
-    login(email.trim(), name.trim() || email.split('@')[0]);
+    const result = authModalMode === 'signup'
+      ? await register(trimmedName, trimmedEmail, password)
+      : await login(trimmedEmail, password);
+
+    if (!result?.success) {
+      setError(result?.error || 'Authentication failed. Please try again.');
+    } else {
+      setPassword('');
+    }
   };
 
-  const handleDemoLogin = () => {
+  const handleDemoLogin = async () => {
     setError('');
-    login('citizen@econexus.in', 'Citizen Steward', 'Citizen');
+    const result = await demoLogin();
+    if (!result?.success) {
+      setError(result?.error || 'Demo login failed. Please try again.');
+    }
   };
 
   const handleClose = () => {
@@ -214,10 +247,13 @@ export default function AuthModal() {
 
             <button
               type="submit"
+              disabled={authLoading}
               className="btn btn-primary btn-md"
-              style={{ width: '100%', marginTop: '6px', justifyContent: 'center', fontWeight: 700 }}
+              style={{ width: '100%', marginTop: '6px', justifyContent: 'center', fontWeight: 700, opacity: authLoading ? 0.75 : 1 }}
             >
-              {authModalMode === 'login' ? 'Sign In to Account →' : 'Complete Registration →'}
+              {authLoading
+                ? (authModalMode === 'login' ? 'Signing In...' : 'Creating Account...')
+                : (authModalMode === 'login' ? 'Sign In to Account →' : 'Complete Registration →')}
             </button>
           </form>
 
@@ -231,6 +267,7 @@ export default function AuthModal() {
           {/* Quick 1-Click Demo Login */}
           <button
             type="button"
+            disabled={authLoading}
             onClick={handleDemoLogin}
             className="btn btn-secondary btn-md"
             style={{
