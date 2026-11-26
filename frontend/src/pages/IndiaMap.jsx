@@ -686,14 +686,14 @@ export default function IndiaMap() {
               {/* DRAW REAL ROAD ROUTES */}
               {roadRouteData && isRoutingActive && (
                 <>
-                  {/* Normal Route Polyline */}
-                  {roadRouteData.normalRoute && (
+                  {/* Render inactive route first with dashed contrasting style */}
+                  {selectedRouteKey !== 'normal' && roadRouteData.normalRoute && (
                     <Polyline
                       positions={roadRouteData.normalRoute.waypoints}
-                      color={selectedRouteKey === 'normal' ? '#ea580c' : '#94a3b8'}
-                      weight={selectedRouteKey === 'normal' ? 6 : 4}
-                      opacity={selectedRouteKey === 'normal' ? 0.95 : 0.55}
-                      dashArray={selectedRouteKey === 'normal' ? null : '5, 8'}
+                      color="#ea580c"
+                      weight={5}
+                      opacity={0.75}
+                      dashArray="8, 8"
                       eventHandlers={{
                         click: () => setSelectedRouteKey('normal')
                       }}
@@ -717,14 +717,13 @@ export default function IndiaMap() {
                     </Polyline>
                   )}
 
-                  {/* Lower Pollution Route Polyline */}
-                  {roadRouteData.lowerPollutionRoute && (
+                  {selectedRouteKey !== 'lower_pollution' && roadRouteData.lowerPollutionRoute && (
                     <Polyline
                       positions={roadRouteData.lowerPollutionRoute.waypoints}
                       color="#10b981"
-                      weight={selectedRouteKey === 'lower_pollution' ? 7 : 4}
-                      opacity={selectedRouteKey === 'lower_pollution' ? 0.98 : 0.55}
-                      dashArray={selectedRouteKey === 'lower_pollution' ? null : '4, 6'}
+                      weight={5}
+                      opacity={0.8}
+                      dashArray="8, 8"
                       eventHandlers={{
                         click: () => setSelectedRouteKey('lower_pollution')
                       }}
@@ -743,14 +742,52 @@ export default function IndiaMap() {
                               AQI {roadRouteData.lowerPollutionRoute.pollution.avgAQI} ({roadRouteData.lowerPollutionRoute.pollution.label})
                             </strong>
                           </div>
-                          {roadRouteData.lowerPollutionRoute.reductionPct > 0 && (
-                            <div style={{ fontSize: '11px', color: '#15803d', fontWeight: 700, marginTop: '3px' }}>
-                              ~{roadRouteData.lowerPollutionRoute.reductionPct}% lower estimated exposure
-                            </div>
-                          )}
                         </div>
                       </Popup>
                     </Polyline>
+                  )}
+
+                  {/* Render active route on top with white outer casing for clear separation */}
+                  {activeRoute && (
+                    <>
+                      <Polyline
+                        positions={activeRoute.waypoints}
+                        color="#ffffff"
+                        weight={10}
+                        opacity={0.85}
+                        interactive={false}
+                      />
+                      <Polyline
+                        positions={activeRoute.waypoints}
+                        color={selectedRouteKey === 'lower_pollution' ? '#10b981' : '#ea580c'}
+                        weight={6}
+                        opacity={1}
+                      >
+                        <Popup>
+                          <div style={{ padding: '4px', minWidth: '180px' }}>
+                            <strong style={{ color: selectedRouteKey === 'lower_pollution' ? '#16a34a' : '#ea580c' }}>
+                              {selectedRouteKey === 'lower_pollution' ? '🌱 Lower Pollution Route' : '🚗 Normal Route'}
+                            </strong>
+                            <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                              Distance: <strong>{activeRoute.distanceText}</strong>
+                            </div>
+                            <div style={{ fontSize: '12px' }}>
+                              Est. Travel Time: <strong>{activeRoute.durationText}</strong>
+                            </div>
+                            <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                              Pollution Level: <strong style={{ color: activeRoute.pollution.color }}>
+                                AQI {activeRoute.pollution.avgAQI} ({activeRoute.pollution.label})
+                              </strong>
+                            </div>
+                            {activeRoute.reductionPct > 0 && (
+                              <div style={{ fontSize: '11px', color: '#15803d', fontWeight: 700, marginTop: '3px' }}>
+                                ~{activeRoute.reductionPct}% lower estimated exposure
+                              </div>
+                            )}
+                          </div>
+                        </Popup>
+                      </Polyline>
+                    </>
                   )}
                 </>
               )}

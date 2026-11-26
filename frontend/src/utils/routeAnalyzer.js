@@ -166,27 +166,30 @@ export async function fetchRoadRoutes(origin, dest, stations = []) {
       const data = await res.json();
       if (data.routes && data.routes.length > 0) {
         // Map OSRM routes
-        const parsedRoutes = data.routes.map((r, idx) => {
-          // OSRM coordinates are [lon, lat], Leaflet polyline needs [lat, lon]
-          const waypoints = r.geometry.coordinates.map(coord => [coord[1], coord[0]]);
-          const distanceMeters = r.distance;
-          const durationSeconds = r.duration;
-          const pollution = analyzeRoutePollution(waypoints, stations);
-          const steps = parseOsrmSteps(r.legs);
+        const parsedRoutes = data.routes.map((r, idx) => mapOsrmRoute(r, `osrm-route-${idx}`, idx, stations));
 
-          return {
-            id: `osrm-route-${idx}`,
-            distanceKm: (distanceMeters / 1000).toFixed(1),
-            distanceText: formatDistance(distanceMeters),
-            durationText: formatDuration(durationSeconds),
-            durationSeconds,
-            distanceMeters,
-            waypoints,
-            steps,
-            pollution,
-            summary: r.legs?.[0]?.summary || `Route ${idx + 1}`
-          };
-        });
+        // If OSRM returned only 1 route, or the 2nd route heavily overlaps / has nearly identical AQI,
+        // request a real OSRM road route via a cleaner detour waypoint away from the highest-AQI zone.
+        const needsCleanerDetour =
+          parsedRoutes.length === 1 ||
+          (parsedRoutes.length >= 2 &&
+            (routeOverlapRatio(parsedRoutes[0].waypoints, parsedRoutes[1].waypoints) > 0.78 ||
+              Math.abs(parsedRoutes[0].pollution.avgAQI - parsedRoutes[1].pollution.avgAQI) < 4));
+
+        if (needsCleanerDetour) {
+          const detourRoute = await fetchCleanerDetourRoute(origin, dest, parsedRoutes[0], stations);
+          if (detourRoute) {
+            if (parsedRoutes.length === 1) {
+              parsedRoutes.push(detourRoute);
+            } else {
+              // Keep whichever alternative has lower pollution or less overlap
+              const existingAlt = parsedRoutes[1];
+              if (detourRoute.pollution.avgAQI <= existingAlt.pollution.avgAQI) {
+                parsedRoutes[1] = detourRoute;
+              }
+            }
+          }
+        }
 
         return buildPollutionAwareRoutes(parsedRoutes, origin, dest, stations);
       }
@@ -197,6 +200,135 @@ export async function fetchRoadRoutes(origin, dest, stations = []) {
 
   // Fallback route generator if offline or rate limited
   return generateFallbackRoadRoutes(origin, dest, stations);
+}
+
+function mapOsrmRoute(r, id, idx = 0, stations = []) {
+  // OSRM coordinates are [lon, lat], Leaflet polyline needs [lat, lon]
+  const waypoints = r.geometry.coordinates.map(coord => [coord[1], coord[0]]);
+  const distanceMeters = r.distance;
+  const durationSeconds = r.duration;
+  const pollution = analyzeRoutePollution(waypoints, stations);
+  const steps = parseOsrmSteps(r.legs);
+  const summary = (r.legs || []).map(l => l.summary).filter(Boolean).join(' → ') || `Route ${idx + 1}`;
+
+  return {
+    id,
+    distanceKm: (distanceMeters / 1000).toFixed(1),
+    distanceText: formatDistance(distanceMeters),
+    durationText: formatDuration(durationSeconds),
+    durationSeconds,
+    distanceMeters,
+    waypoints,
+    steps,
+    pollution,
+    summary
+  };
+}
+
+/**
+ * Estimates how much two route polylines overlap (0 = completely separate, 1 = identical).
+ */
+function routeOverlapRatio(waypointsA, waypointsB) {
+  if (!waypointsA?.length || !waypointsB?.length) return 0;
+  const start = waypointsA[0];
+  const end = waypointsA[waypointsA.length - 1];
+  const tripKm = Math.max(2, haversineDistance(start[0], start[1], end[0], end[1]));
+  const thresholdKm = Math.min(12, Math.max(0.8, tripKm * 0.03));
+
+  const sampleStepA = Math.max(1, Math.floor(waypointsA.length / 25));
+  const sampleStepB = Math.max(1, Math.floor(waypointsB.length / 40));
+  let matched = 0;
+  let total = 0;
+
+  for (let i = 0; i < waypointsA.length; i += sampleStepA) {
+    const [aLat, aLng] = waypointsA[i];
+    total++;
+    for (let j = 0; j < waypointsB.length; j += sampleStepB) {
+      const [bLat, bLng] = waypointsB[j];
+      if (haversineDistance(aLat, aLng, bLat, bLng) <= thresholdKm) {
+        matched++;
+        break;
+      }
+    }
+  }
+
+  return total > 0 ? matched / total : 0;
+}
+
+/**
+ * Estimates AQI at a single [lat, lng] coordinate using IDW from stations.
+ */
+function estimatePointAQI(lat, lng, validStations) {
+  if (!validStations.length) return 100;
+  let totalWeight = 0;
+  let weightedSum = 0;
+  for (const s of validStations) {
+    const dist = haversineDistance(lat, lng, Number(s.lat), Number(s.lng));
+    const weight = 1 / Math.pow(Math.max(dist, 5), 2);
+    weightedSum += (Number(s.aqi) || 100) * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weightedSum / totalWeight : 100;
+}
+
+/**
+ * Picks a cleaner detour waypoint away from the highest-pollution point on the primary route
+ * and fetches a real OSRM road route through it.
+ */
+async function fetchCleanerDetourRoute(origin, dest, primaryRoute, stations = []) {
+  try {
+    const validStations = stations.filter(
+      s => s && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))
+    );
+    const pts = primaryRoute.waypoints;
+    if (!pts || pts.length < 3) return null;
+
+    // Find the most polluted point in the middle 20%..80% of the primary route
+    const startIdx = Math.floor(pts.length * 0.2);
+    const endIdx = Math.max(startIdx + 1, Math.floor(pts.length * 0.8));
+    let hotspot = pts[Math.floor(pts.length / 2)];
+    let highestAqi = -1;
+
+    for (let i = startIdx; i <= endIdx; i += Math.max(1, Math.floor((endIdx - startIdx) / 10))) {
+      const [pLat, pLng] = pts[i];
+      const aqi = estimatePointAQI(pLat, pLng, validStations);
+      if (aqi > highestAqi) {
+        highestAqi = aqi;
+        hotspot = [pLat, pLng];
+      }
+    }
+
+    const oLat = Number(origin.lat);
+    const oLng = Number(origin.lng);
+    const dLat = Number(dest.lat);
+    const dLng = Number(dest.lng);
+    const dVecLat = dLat - oLat;
+    const dVecLng = dLng - oLng;
+    const offsetScale = 0.18;
+
+    // Test both perpendicular sides around the hotspot and pick the cleaner side
+    const sideA = [hotspot[0] - dVecLng * offsetScale, hotspot[1] + dVecLat * offsetScale];
+    const sideB = [hotspot[0] + dVecLng * offsetScale, hotspot[1] - dVecLat * offsetScale];
+    const aqiA = estimatePointAQI(sideA[0], sideA[1], validStations);
+    const aqiB = estimatePointAQI(sideB[0], sideB[1], validStations);
+    const via = aqiA <= aqiB ? sideA : sideB;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const url = `https://router.project-osrm.org/route/v1/driving/${oLng},${oLat};${via[1].toFixed(5)},${via[0].toFixed(5)};${dLng},${dLat}?overview=full&geometries=geojson&steps=true`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.routes || !data.routes[0]) return null;
+
+    const mapped = mapOsrmRoute(data.routes[0], 'osrm-cleaner-detour', 1);
+    mapped.pollution = analyzeRoutePollution(mapped.waypoints, stations);
+    return mapped;
+  } catch {
+    return null;
+  }
 }
 
 /**
